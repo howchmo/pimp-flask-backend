@@ -4,11 +4,32 @@ import psycopg2 as ps
 import psycopg2.extras
 import json
 import uuid
+from pimp_api import pimp_api
+from pimp_card_api import pimp_card_api
+import base64
 
-import pimp_api
-
-app = Flask(__name__, static_folder='../pimp-webclient/www', static_url_path='')
+app = Flask(__name__, static_folder='../pimp-webclient/www/', static_url_path='/pimp/')
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1920 * 1080
+app.config['UPLOAD_FOLDER'] = '../pimp-webclient/www/files/'
 api = Api(app)
+
+@app.route('/pimp/')
+def root():
+	return app.send_static_file('index.html')
+
+ALLOWED_EXTENSIONS = set(['png', 'jpg', 'jpeg', 'gif'])
+def allowed_file(filename):
+	return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+@app.route('/pimp/upload', methods=['POST'])
+def upload_image():
+	data = request.json
+	id = str(uuid.uuid4())
+	filepath = app.config['UPLOAD_FOLDER']+id+data['extension']
+	with open(filepath, 'wb') as f:
+		f.write(base64.b64decode(data['blob']))
+	data['path'] = "files/"+id+data['extension']
+	return data
 
 conn = ps.connect(
 	host='localhost',
@@ -16,85 +37,8 @@ conn = ps.connect(
 	user='pimp',
 	password='pimp')
 
-class pimp_api( Resource ):
-	def __init__(self, db_connection):
-		self.conn = db_connection
-
-	def get(self):
-		sql = """SELECT _id, title, born, doc from cards;"""
-		c = conn.cursor(cursor_factory=ps.extras.RealDictCursor)
-		try:
-			c.execute(sql)
-			c.close()
-			return jsonify(c.fetchall())
-		except (Exception, ps.DatabaseError) as error:
-			return jsonify(error)
-
-	def post(self):
-		j = json.loads(request.form['string'])
-		if not j or not 'title' in j:
-			abort(400)
-		sql = """INSERT INTO cards(_id, title, born, doc) VALUES (%s, %s, %s, %s);"""
-		c = conn.cursor() # cursor_factory=ps.extras.RealDictCursor)
-		id = str(uuid.uuid4())
-		print(id)
-		seq = []
-		seq.append(id)
-		seq.append(j['title'])
-		seq.append(j['born'])
-		seq.append(json.dumps(j['doc']))
-		try:
-			c.execute(sql, seq)
-			conn.commit()
-			c.close()
-			return id, 201
-		except (Exception, ps.DatabaseError) as error:
-			print("ERROR: "+str(error))
-
-class pimp_card_api( Resource ):
-	def __init__(self, db_connection):
-		self.conn = db_connection
-
-	def get(self, id):
-		sql = "SELECT _id, title, born, doc FROM cards WHERE _id = '"+id+"';"
-		c = conn.cursor(cursor_factory=ps.extras.RealDictCursor)
-		try:
-			c.execute(sql)
-			r = jsonify(c.fetchone())
-			c.close()
-			return r
-		except (Exception, ps.DatabaseError) as error:
-			print("ERROR: "+str(error))
-
-	def put(self, id):
-		sql = """UPDATE cards SET title=%s, doc=%s WHERE _id = %s"""
-		c = conn.cursor()
-		j = json.loads(request.json['string'])
-		seq = []
-		seq.append(j['title'])
-		seq.append(json.dumps(j['doc']))
-		seq.append(str(id))
-		try:
-			c.execute(sql, seq)
-			conn.commit()
-			c.close()
-			return id, 201
-		except( Exception, ps.DatabaseError) as error:
-			print("ERROR: "+str(error))
-
-	def delete(self, id):
-		sql = "DELETE FROM cards WHERE _id = '"+id+"';"
-		c = conn.cursor()
-		try:
-			c.execute(sql)
-			conn.commit()
-			c.close()
-			return id, 201
-		except( Exception, ps.DatabaseError) as error:
-			print("ERROR: "+str(error))
-
-api.add_resource(pimp_api, '/pimp/', endpoint = 'cards', resource_class_kwargs = {'db_connection':conn})
-api.add_resource(pimp_card_api, '/pimp/<string:id>', endpoint = 'card', resource_class_kwargs = {'db_connection':conn})
+api.add_resource(pimp_api, '/pimp/pimp/', endpoint = 'cards', resource_class_kwargs = {'db_connection':conn})
+api.add_resource(pimp_card_api, '/pimp/pimp/<string:id>', endpoint = 'card', resource_class_kwargs = {'db_connection':conn})
 
 if __name__ == '__main__':
-	app.run(debug=True)
+	app.run(debug=True, host="0.0.0.0", port=5000 )
